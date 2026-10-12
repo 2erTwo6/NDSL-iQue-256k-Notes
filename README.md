@@ -37,6 +37,10 @@
 | `dsfwtool -comp` | 61979 字节 | ❌ 白屏 |
 | `ndsl_mod.py` `vpk_compress()` | **60036 字节** | ✅ 正常启动 |
 
+> 上表的 `dsfwtool` 结论是在提交 `b25dafbe` 上得出的。上游其后的提交
+> `f2c071fc`（`Make P345 compression emit effective streams`）可能与此有关，
+> 但**未经实机验证**。本项目锁定的提交见「依赖 → dsfwtool 版本」一节。
+
 ---
 
 ## 当前状态
@@ -150,6 +154,9 @@ sha256  29d863dec6b5e06d4acf9d6ce9908a61cd1a52a05a40ebccf2a806a243c46d8f
 仓库里没有 `build/`、`dist/` 和两份 dump**，需要按下面的"需要准备的文件"自备，
 再运行构建脚本生成。
 
+`dsfwtool/`（外部依赖，本机编译的工作副本）同样是 `[本地]`，不入版本库；
+本项目使用的具体提交见下面「dsfwtool 版本」一节。
+
 ---
 
 ## 依赖
@@ -157,15 +164,40 @@ sha256  29d863dec6b5e06d4acf9d6ce9908a61cd1a52a05a40ebccf2a806a243c46d8f
 - Python 3
 - [`dsfwtool`](https://github.com/Wokann/dsfwtool)：DS 固件的解密/解压、
   重新组装与校验。**注意其 P345 编码器不能用于重新压缩 P5**（见文首）。
+  **本项目验证过的具体提交见下面「dsfwtool 版本」一节，不要用 master。**
 - `ndsl-hns-mod/tools/ndsl_mod.py`（仓库内）：P3/P4/P5 的 vpk 编码器，
   以及 P1/P2 的 LZ77 + KEY1 编解码。**本移植的 P5 必须用它编码。**
 - 可选：`armips`，仅在你需要自己改 P1/P3 汇编时使用。
 
-`dsfwtool` 的 Linux 构建示例：
+### dsfwtool 版本（重要：本项目的白屏结论绑定在这个提交上）
+
+本项目全部构建与实机验证使用的是：
+
+```text
+Wokann/dsfwtool @ b25dafbe7483037fc373bb8e7bb920778ed49d0a
+                 提交信息: Add FlashMe-compatible P345 compression
+                 日期:     2026-09-11
+```
+
+**为什么必须锁提交、而不能只写版本号**：dsfwtool 上游**没有任何 tag**，
+`DSFWTOOL_VERSION` 在源码里硬编码为 `"1.0"` 且从未变过，所以 `dsfwtool -v`
+打印的 `v1.0` 无法区分任何两个提交 —— 任何一次 clone 编出来都是 `v1.0`。
+上面这个 SHA 是逐文件哈希比对定死的（本目录下 25 个文本文件与上游该提交
+逐字节一致）。
+
+**注意**：该提交是上游 master 之前的第 7 个提交，其后第一个提交
+`f2c071fc` 的标题正是 `Make P345 compression emit effective streams`
+（让 P345 压缩产出有效流）。也就是说，本 README 文首「`dsfwtool -comp`
+压 P5 会导致真机白屏」这个结论，是在**尚未包含该后续修改**的版本上得出的。
+如果你换用更新的 dsfwtool，该问题**有可能**已被改善，但**未经本项目实机验证**；
+在真机上验证之前，请仍然遵守文首的规则（P5 用 `ndsl_mod.py` 编码）。
+
+Linux 构建（**务必 checkout 到该提交**）：
 
 ```bash
 git clone https://github.com/Wokann/dsfwtool.git
 cd dsfwtool
+git checkout b25dafbe7483037fc373bb8e7bb920778ed49d0a
 make
 # 得到 release/dsfwtool，或者自己指定编译器
 ```
