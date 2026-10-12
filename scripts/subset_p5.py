@@ -6,13 +6,21 @@ into a 256 KiB firmware image.
 The P5 image contains four JNCM (BNCMP 1.2) character maps and four JNFR
 (BNFR 1.2) bitmap fonts.  This script keeps:
 
-  * every character referenced by a JNLL text string in P5
-  * all printable ASCII characters
-  * private-use and common symbol glyphs (often used as UI icons)
+  * every character referenced by the Chinese and English UTF-8 DAT1 UI
+    tables; these are what the visible system UI uses, not the older
+    UTF-16LE JNLL messages
+  * the complete original 9x9 font, which contains the keyboard's Latin-1/
+    Extended, kana and symbol glyphs
+  * the same keyboard repertoire in the large font as well, because the
+    input keyboard may be drawn with either face depending on the screen
+  * the runtime digits and the '@' invalid-glyph fallback
   * every glyph of the two small font resources
 
-Unused glyph bitmap bytes are replaced with 0xFF.  Resource start offsets are
-preserved, so no other P5 pointers need to be moved.
+The French/German/Italian/Spanish DAT1 payloads are cleared in place to free
+compressed P5 space; their headers and sizes are preserved and the legacy
+JNLL blocks are left untouched.  Unused glyph bitmap bytes are replaced with
+0x00.  Resource start offsets are preserved, so no other P5 pointers need to
+be moved.
 
 Usage:
     python3 scripts/subset_p5.py INPUT_P5.bin OUTPUT_P5.bin
@@ -234,6 +242,107 @@ def extract_referenced_text_chars(p5: bytes):
     return used
 
 
+def extract_dat1_text_chars(
+    p5: bytes,
+    block_index: int | None = 0,
+    max_length: int | None = None,
+    restrict_to: set | None = None,
+) -> set:
+    """Collect characters from one or all UTF-8 DAT1 text tables.
+
+    The visible iQue UI strings are stored in NUL-terminated UTF-8 DAT1
+    blocks, one block per language.  ``block_index=None`` reads every block;
+    ``max_length`` keeps only strings up to that many Unicode code points;
+    ``restrict_to`` keeps only strings whose characters are all available in
+    that codepoint set.  The latter is used to mirror the original 9x9 font's
+    character repertoire for the smaller font resource.
+    """
+    used = set()
+    limit = len(p5)
+
+    blocks = []
+    for match in re.finditer(b"DAT1", p5):
+        offset = match.start()
+        if offset + 8 > limit:
+            continue
+        size = struct.unpack_from("<I", p5, offset + 4)[0]
+        if size < 8 or offset + size > limit:
+            continue
+        blocks.append((offset, size))
+
+    if block_index is None:
+        selected = blocks
+    elif 0 <= block_index < len(blocks):
+        selected = [blocks[block_index]]
+    else:
+        return used
+
+    for offset, size in selected:
+        end = offset + size
+        pos = offset + 8
+
+        while pos < end:
+            while pos < end and p5[pos] == 0:
+                pos += 1
+            if pos >= end:
+                break
+
+            text_end = p5.find(b"\x00", pos, end)
+            if text_end < 0:
+                text_end = end
+
+            try:
+                text = p5[pos:text_end].decode("utf-8")
+            except UnicodeDecodeError:
+                text = ""
+
+            chars = {ord(ch) for ch in text}
+            if max_length is None or len(text) <= max_length:
+                if restrict_to is None or chars <= restrict_to:
+                    used.update(chars)
+
+            pos = text_end + 1
+
+    return used
+
+
+def clear_other_language_dat1_blocks(
+    p5: bytearray, keep: set[int] | None = None
+) -> tuple[int, int]:
+    """Zero non-kept UTF-8 DAT1 language payloads, preserving headers.
+
+    The visible Chinese UI uses the first DAT1 block and English strings are
+    kept as a fallback.  Clearing the remaining language payloads frees
+    enough compressed P5 space for complete keyboard glyph coverage without
+    touching the legacy JNLL blocks.
+    """
+    if keep is None:
+        keep = {0, 1}
+
+    blocks = []
+    for match in re.finditer(b"DAT1", p5):
+        offset = match.start()
+        if offset + 8 > len(p5):
+            continue
+        size = struct.unpack_from("<I", p5, offset + 4)[0]
+        if size < 8 or offset + size > len(p5):
+            continue
+        blocks.append((offset, size))
+
+    cleared = 0
+    for index, (offset, size) in enumerate(blocks):
+        if index in keep:
+            continue
+        payload_start = offset + 8
+        payload_end = offset + size
+        if payload_end > payload_start:
+            p5[payload_start:payload_end] = b"\x00" * (payload_end - payload_start)
+            cleared += payload_end - payload_start
+
+    cleared_blocks = sum(1 for index in range(len(blocks)) if index not in keep)
+    return cleared_blocks, cleared
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print(__doc__.strip())
@@ -267,14 +376,57 @@ def main() -> int:
         fonts.append(font)
     fonts.sort(key=lambda f: f["offset"])
 
-    # The two small fonts are kept in full.  For the two main fonts, keep all
-    # UI text, all printable ASCII, and typical icon/symbol ranges.
-    keep_base = extract_referenced_text_chars(p5)
-    keep_base.update(range(0x20, 0x7F))
-    keep_base.update(range(0xE000, 0xF900))  # private use
-    keep_base.update(range(0x2000, 0x27C0))  # punctuation/symbols/box drawing
-    keep_base.update((0x3000, 0x3001, 0x3002, 0x300C, 0x300D,
-                      0xFF0C, 0xFF0E, 0x2026, 0x25A0))
+    # The visible iQue UI strings are stored in UTF-8 DAT1 tables.  The old
+    # UTF-16LE JNLL messages are legacy duplicates and are cleared below.
+    # The large 11x12 font gets every character used by any DAT1 language
+    # table.  The smaller 9x9 font mirrors the original 9x9 font repertoire:
+    # only strings whose characters are all present in the original 9x9
+    # mapping are allowed to contribute glyphs.
+    main_fonts = [f for f in fonts if f["count"] not in (59, 26)]
+    big_count = max((f["count"] for f in main_fonts), default=7226)
+    small_count = min((f["count"] for f in main_fonts), default=680)
+    small_font_map = next(
+        (f["map"]["seq"] for f in main_fonts if f["count"] == small_count), []
+    )
+
+    # Keep Chinese and English UI coverage in the large font.  The 9x9 font
+    # is also the virtual-keyboard font, so keep its complete original
+    # character set: it contains Basic Latin, Latin-1/Extended, kana and
+    # symbol glyphs that are not referenced by any DAT1 UI string.
+    big_font_chars = set()
+    for block_index in (0, 1):
+        big_font_chars.update(
+            extract_dat1_text_chars(p5, block_index=block_index)
+        )
+    small_font_chars = set(small_font_map)
+    # Also teach the large font the complete keyboard repertoire.  Depending
+    # on the screen, the input keyboard may be drawn with either the 9x9 or
+    # the 11x12 face; having the same glyph set in both avoids '@' fallbacks.
+    big_font_chars.update(small_font_chars)
+
+    # The JNLL-derived boot/menu strings still use one character that is not
+    # present in any DAT1 table: U+8BFB ('读').  Keep it in the large font so
+    # that remaining system text does not fall back to '@'.
+    big_font_chars.add(0x8BFB)
+
+    if not big_font_chars:
+        # Fallback for older P5 revisions that have no DAT1 table.
+        big_font_chars = extract_referenced_text_chars(p5)
+        small_font_chars = set(big_font_chars)
+    else:
+        cleared_blocks, cleared_bytes = clear_other_language_dat1_blocks(
+            p5, keep={0, 1}
+        )
+        print(
+            f"cleared {cleared_blocks} non-Chinese/English DAT1 tables "
+            f"({cleared_bytes} bytes)"
+        )
+
+    # The firmware renders dates/times from runtime digits, and the BNCMP
+    # invalid-glyph fallback is '@'.  Other symbols come from the actual text.
+    runtime_chars = set(range(0x30, 0x3A)) | {0x40}
+    big_font_chars.update(runtime_chars)
+    small_font_chars.update(runtime_chars)
 
     starts = sorted(jncm_offsets + jnfr_offsets)
 
@@ -288,8 +440,10 @@ def main() -> int:
         mapping = font["map"]["seq"]
         if font["count"] in (59, 26):
             keep_codepoints = list(mapping)
+        elif font["count"] == big_count:
+            keep_codepoints = [cp for cp in mapping if cp in big_font_chars]
         else:
-            keep_codepoints = [cp for cp in mapping if cp in keep_base]
+            keep_codepoints = [cp for cp in mapping if cp in small_font_chars]
 
         index_by_cp = {cp: i for i, cp in enumerate(mapping)}
         glyph_records = {}
@@ -320,7 +474,7 @@ def main() -> int:
             return 1
         p5[font["offset"]:font["offset"] + len(new_font)] = new_font
         p5[font["offset"] + len(new_font):font["offset"] + cap_font] = (
-            b"\xFF" * (cap_font - len(new_font))
+            b"\x00" * (cap_font - len(new_font))
         )
 
         new_map = encode_jncm(order)
@@ -331,7 +485,7 @@ def main() -> int:
             return 1
         p5[map_offset:map_offset + len(new_map)] = new_map
         p5[map_offset + len(new_map):map_offset + cap_map] = (
-            b"\xFF" * (cap_map - len(new_map))
+            b"\x00" * (cap_map - len(new_map))
         )
 
         print(
