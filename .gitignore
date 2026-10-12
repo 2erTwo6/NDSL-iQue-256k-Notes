@@ -1,0 +1,15 @@
+# 构建中间产物与成品镜像
+build/
+dist/
+work/
+
+# 官方固件 dump / BIOS / 解包结果：绝对不要提交
+extract/
+网友分享的神游DSL固件/
+从我的日版机DSL上提取的系统/
+ndsl-hns-mod/factory/
+ndsl-hns-mod/out/
+
+# Python 缓存
+__pycache__/
+*.pyc

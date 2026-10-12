@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
 #
+# ⚠️ 这个脚本构建出的镜像在 melonDS 里正常，但刷进真机是纯白屏。
+#
+# 请改用 scripts/build_firmware_userp5.sh（唯一实机验证通过的构建）。
+# 它和本脚本的唯一区别是 P5 改用 ndsl-hns-mod/tools/ndsl_mod.py 的
+# vpk_compress() 编码 —— dsfwtool 的 vpk 编码器在任天堂原始流上 bit-exact，
+# 但对我们改过的 P5 数据压出来的流真机解压器不接受。
+# 详见 README.md 开头那一节和踩坑记录第 7 条。
+#
+# 本脚本保留仅作参考（例如需要复现白屏现象时）。
+#
 # Build a 256 KiB DS Lite firmware by porting the iQue DS Chinese UI from a
 # 512 KiB iQue firmware dump and subsetting its P5 fonts.
 #
