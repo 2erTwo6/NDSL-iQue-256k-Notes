@@ -115,11 +115,16 @@ sha256  29d863dec6b5e06d4acf9d6ce9908a61cd1a52a05a40ebccf2a806a243c46d8f
 
 ## 仓库结构
 
+**版本库里只有脚本、文档和 `ndsl_mod.py` 编码器**，不含任何固件 dump、构建产物
+或镜像（它们要么是官方固件，要么含主机私有的 Wi-Fi 校准/MAC）。下面用
+`[入库]` / `[本地]` 标出每个条目的状态。
+
 ```text
 .
-├── README.md
-├── LICENSE
-├── scripts
+├── README.md                     [入库]
+├── LICENSE                       [入库]
+├── .gitignore                    [入库]
+├── scripts                       [入库]
 │   ├── build_firmware_userp5.sh  # ★ 正式构建：P5 用 ndsl_mod.py 编码
 │   ├── build_firmware.sh         # 早期版本，真机白屏，仅作参考
 │   ├── make_header.py            # 生成 256 KiB iQue 主固件头
@@ -128,15 +133,22 @@ sha256  29d863dec6b5e06d4acf9d6ce9908a61cd1a52a05a40ebccf2a806a243c46d8f
 │   ├── subset_p5_min.py          # 另一路子集：只清位图、结构不动（放不下，留档）
 │   └── build_variant_jp_p2.sh    # 反向/变体构建脚本（排查用，见第 8 条）
 ├── ndsl-hns-mod                  # 独立的固件魔改工具链
-│   ├── tools/ndsl_mod.py         # ★ vpk/LZ77 编码器 + KEY1 + 校验（本移植依赖它）
-│   ├── factory/                  # 原厂固件副本（只读）
-│   └── out/                      # 去掉开机健康提示的固件
-├── build/                        # 构建中间文件（不入 Git）
-└── dist/                         # 最终镜像（不入 Git）
-    └── not-working-do-not-flash/ # 已知白屏/黑屏的旧镜像
+│   └── tools/ndsl_mod.py         # [入库] ★ vpk/LZ77 编码器 + KEY1 + 校验（本移植依赖它）
+├── build/                        # [本地] 构建中间文件，由脚本生成
+├── dist/                         # [本地] 最终镜像，由脚本生成
+│   └── not-working-do-not-flash/ # [本地] 已知白屏/黑屏的旧镜像
+├── 网友分享的神游DSL固件/          # [本地] 使用者自备：神游 512 KiB 固件 dump
+│   └── idsl-fw.bin
+└── 从我的日版机DSL上提取的系统/    # [本地] 使用者自备：目标机 256 KiB 固件 dump
+    └── FW001656B0043F/firmware.bin
 ```
 
-构建时产生的中间文件放在 `build/`，最终镜像输出到 `dist/`。
+`ndsl-hns-mod/factory/`（原厂固件副本）和 `ndsl-hns-mod/out/`（去掉开机健康提示
+的固件）同样属于 `[本地]`，含官方固件内容，默认不入版本库。
+
+构建时产生的中间文件放在 `build/`，最终镜像输出到 `dist/`。**刚 clone 下来的
+仓库里没有 `build/`、`dist/` 和两份 dump**，需要按下面的"需要准备的文件"自备，
+再运行构建脚本生成。
 
 ---
 
@@ -369,11 +381,13 @@ assert nm.vpk_decompress(data) == open("build/ique_p5_subset.bin", "rb").read()
 - 脚本代码以 MIT 许可证发布；官方固件内容的权利归其各自权利人所有。
 - 最终构建产物中包含使用者自己主机的 Wi-Fi 校准、MAC、Access Point 和用户设置，
   以及官方固件代码，默认不应公开分发。
-- **注意**：本仓库的 Git 历史里目前仍跟踪着官方固件 dump 的分量、构建中间产物
-  和成品镜像（例如 `extract/`、`work/`、以及根目录的 `idsl-256k-chs.bin`）。
-  如果打算公开或推送到远端，请先清理这些内容（`git rm --cached` 并重写历史），
-  并补上 `.gitignore`。根目录那份 `idsl-256k-chs.bin` 还是**白屏版本**，
-  正式产物是 `dist/idsl-256k-chs-userp5.bin`。
+- **提交前注意**：本仓库当前只跟踪脚本、文档和 `ndsl_mod.py`；官方固件 dump、
+  构建中间产物和成品镜像（`extract/`、`work/`、`build/`、`dist/`、两份 dump 目录、
+  根目录的 `idsl-256k-chs.bin` 等）已由 `.gitignore` 排除。
+  如果你在本机重新生成了这些内容，**不要让它们进入提交**：成品镜像里含你自己
+  主机的 Wi-Fi 校准、MAC 和用户设置。可用 `git status` 确认它们没有被跟踪。
+- 正式产物是 `dist/idsl-256k-chs-userp5.bin`（`[本地]`，不入库，含主机私有数据）。
+  根目录若出现 `idsl-256k-chs.bin`，那是早期 **白屏版本**，不是正式产物。
 
 ---
 
@@ -384,7 +398,8 @@ assert nm.vpk_decompress(data) == open("build/ique_p5_subset.bin", "rb").read()
 - `ndsl-hns-mod/tools/ndsl_mod.py`（本仓库内）：P3/P4/P5 的 vpk 编码器，
   以及 P1/P2 的 LZ77 + KEY1 编解码。本移植能上真机靠的就是它的
   `vpk_compress()`。
-- [Garhoogin/NitroPaint](https://github.com/Garhoogin/NitroPaint)：`NitroFont.c`
-  中公开的 JNFR/JNCM/BNFR/BNCMP 读取与写入规则。
+- [Garhoogin/NitroPaint](https://github.com/Garhoogin/NitroPaint)：其源码中的
+  `NitroFont.c` 公开了 JNFR/JNCM/BNFR/BNCMP 的读取与写入规则。
+  （该文件属于上游项目，不在本仓库内；本仓库的 `subset_p5.py` 依据它的规则实现。）
 - [Wokann/dscfw](https://github.com/Wokann/dscfw)：DS 固件结构和 FlashMe
   逆向资料。
