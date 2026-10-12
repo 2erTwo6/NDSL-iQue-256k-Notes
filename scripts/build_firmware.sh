@@ -41,7 +41,7 @@ fi
 
 mkdir -p "$BUILD" "$DIST"
 
-echo "[1/5] unpack iQue firmware components"
+echo "[1/6] unpack iQue firmware components"
 "$DSFWTOOL" -x "$IQ_FW" \
     -h "$BUILD/ique_header.bin" \
     -p1 "$BUILD/ique_p1.enc" \
@@ -50,7 +50,7 @@ echo "[1/5] unpack iQue firmware components"
     -p4 -uncomp "$BUILD/ique_p4.bin" \
     -p5 -uncomp "$BUILD/ique_p5.bin"
 
-echo "[2/5] unpack target firmware header"
+echo "[2/6] unpack target firmware header"
 "$DSFWTOOL" -x "$TARGET_FW" \
     -h "$BUILD/target_header.bin" \
     -p1 "$BUILD/target_p1.enc" \
@@ -59,29 +59,39 @@ echo "[2/5] unpack target firmware header"
     -p4 -uncomp "$BUILD/target_p4.bin" \
     -p5 -uncomp "$BUILD/target_p5.bin"
 
-echo "[3/5] create 256 KiB iQue header"
+echo "[3/6] create 256 KiB iQue header"
 python3 "$ROOT/scripts/make_header.py" \
     --target-header "$BUILD/target_header.bin" \
     --ique-header "$BUILD/ique_header.bin" \
     --output "$BUILD/header_iq_256k.bin"
 
-echo "[4/5] subset P5 fonts"
+echo "[4/6] subset P5 fonts"
 python3 "$ROOT/scripts/subset_p5.py" \
     "$BUILD/ique_p5.bin" \
     "$BUILD/ique_p5_subset.bin"
 
-echo "[5/5] assemble firmware"
-# Fixed offsets are chosen so that the larger iQue P1/P2 and the subset P5
-# all fit in 256 KiB.  The final component layout is checked by dsfwtool.
+echo "[5/6] assemble firmware"
+# Keep the original iQue physical component offsets.  P1 must stay at 0x280
+# because the 0x80 bytes at 0x200..0x27F are part of the 512 KiB iQue image
+# but are not exported as a dsfwtool component.  They are restored in step 6.
+# The subset P5 starts at 0x30768 and ends below the 256 KiB settings tail.
 "$DSFWTOOL" -c "$OUTPUT" \
     -h "$BUILD/header_iq_256k.bin" \
-    -p1 --offset 0x000200 "$BUILD/ique_p1.enc" \
-    -p2 --offset 0x00F6D0 "$BUILD/ique_p2.enc" \
-    -p3 -comp --offset 0x017C30 "$BUILD/ique_p3.bin" \
-    -p4 -comp --offset 0x027740 "$BUILD/ique_p4.bin" \
-    -p5 -comp --offset 0x0306E8 "$BUILD/ique_p5_subset.bin" \
+    -p1 --offset 0x000280 "$BUILD/ique_p1.enc" \
+    -p2 --offset 0x00F750 "$BUILD/ique_p2.enc" \
+    -p3 -comp --offset 0x017CB0 "$BUILD/ique_p3.bin" \
+    -p4 -comp --offset 0x0277C0 "$BUILD/ique_p4.bin" \
+    -p5 -comp --offset 0x030768 "$BUILD/ique_p5_subset.bin" \
     -b "$TARGET_FW" \
     -s 256K
+
+echo "[6/6] restore iQue pre-P1 data"
+# dsfwtool exports the 0x180-byte header and P1..P5, but the original iQue
+# image also has an 0x80-byte block at 0x200..0x27F before P1.  Without it
+# the firmware displays the iQue logo and then remains white.
+python3 "$ROOT/scripts/patch_pre_p1.py" \
+    "$IQ_FW" "$OUTPUT" \
+    --p1-offset 0x280
 
 echo
 echo "Built: $OUTPUT"
