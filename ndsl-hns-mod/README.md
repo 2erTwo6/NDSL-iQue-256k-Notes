@@ -135,4 +135,4 @@ python3 tools/ndsl_mod.py patch factory/firmware.bin --bios factory/biosnds7.rom
    帧计数器 [0x023312E0+8]，输入块 0x02333D84（+0x20 触摸，+6 新按键），触摸状态 [0x02331B68]
    Part5 装载地址 0x023A4760（英语健康警告块 0x2A1C 起，WARNING 文本 0x2C68）
    ```
-8. 真机刷写需要 FlashMe（并短接 SL1 写保护点）或硬件编程器；**没有备份与救砖手段不要刷**。
+8. 真机刷写需要 fwmanage（并短接 SL1 写保护点）或硬件编程器；**没有备份与救砖手段不要刷**。
