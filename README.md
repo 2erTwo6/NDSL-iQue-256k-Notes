@@ -46,6 +46,10 @@
 ## 当前状态
 
 - ✅ **已在真实日版 DS Lite 上刷写验证通过**，正常进入中文 iQue 界面。
+- ✅ **内置"跳过开机健康提示"的两版镜像也已在真机上实测通过**（正常开机、正常使用）：
+  `v4`（警告画面数据不装载 + 警告阶段不跑 + 无过渡动画）与 `autoskip`（照原版显示
+  约 1.5 s 后自动进菜单）。补丁偏移、依据与风险分级见
+  `scripts/README-hns-ique.md`。
 - ✅ 已通过 `dsfwtool -i` 校验分量布局和 CRC16；三个分量 CRC 与头部 Wi-Fi
   配置 CRC 均复算吻合。
 - ✅ 已修正字体子集只统计旧 `JNLL` 消息、漏掉实际屏幕使用的 UTF-8 `DAT1`
@@ -56,10 +60,19 @@
   重建时必须原样拷回，且 P1 起始地址需保持 `0x280`。
 - ⚠️ 刷 SPI Flash 有变砖风险，请先备份并准备好恢复方案。
 
-构建产物：`dist/idsl-256k-chs-userp5.bin`
+构建产物（`dist/` 下的镜像都含本机 Wi-Fi 校准/MAC，不要外传）：
 
 ```text
-sha256  29d863dec6b5e06d4acf9d6ce9908a61cd1a52a05a40ebccf2a806a243c46d8f
+dist/idsl-256k-chs-userp5.bin              256 KiB 中文固件（真机验证过）
+  sha256  29d863dec6b5e06d4acf9d6ce9908a61cd1a52a05a40ebccf2a806a243c46d8f
+dist/idsl-256k-chs-userp5-hns-v4.bin       + 完全去掉健康提示（真机验证过）
+  sha256  ff7ff430e69fe8b80d12b0df8c7fcca7bdbe4284d9e841b458663b089614b481
+dist/idsl-256k-chs-userp5-hns-autoskip.bin + 自动跳过健康提示（真机验证过）
+  sha256  a6a5d367a6a14117b2f6c2806e6a8181cbbb369b483e36f3661103ec65bfe2e4
+dist/idsl-256k-chs-userp5-hns-noshow.bin   警告页不显示（仍装载，保留过渡）
+  sha256  6d757c7aa8b8dccea589dae2b0bcdae56d4a81b3990a108f46dafb79f5b07f3f
+dist/idsl-256k-chs-userp5-hns-noload.bin   不装载 + 不显示（保留过渡）
+  sha256  0a8c703b152a4d8017b5d8d99a655300ed11eefce7467d91d7368d1d06a7180c
 ```
 
 （`dist/not-working-do-not-flash/` 下放的是过程中产生的、**已知刷真机白屏或黑屏**
@@ -106,6 +119,11 @@ sha256  29d863dec6b5e06d4acf9d6ce9908a61cd1a52a05a40ebccf2a806a243c46d8f
      说明 P2 的芯片相关处理不是原因；
    - 给 iQue 的 P1 打上"跳过开机健康提示"补丁（`0x0A48: 2348 → 1ae0`）→
      现象无变化，说明开机早期警告画面那条路不是原因；
+     > **注意这条的上下文**：这次实验是在**已经白屏**的镜像上做的，屏幕上什么都没
+     > 显示，所以"无变化"只能说明白屏不是警告画面那条路引起的，**既不能证明也不能
+     > 否定补丁的效果**；而且当时只打了 `autoskip` 一个钩子。该补丁重新定位到神游
+     > P1 的 `0x0A48`/`0x13AA`/`0x1394`/`0x08D6` 之后，已随 `v4` 与 `autoskip`
+     > 在真机上实测通过，见 `scripts/README-hns-ique.md`。
    - 反过来用目标机固件当底座、只把 P3/P5 换成 iQue 的 → 变成**黑屏**
      （屏幕完全不点亮）。原因是**部件不能跨固件版本互换**：iQue 的 P5 解压后
      `387744` 字节，而目标机 P1 是按 `239520` 字节装载的（RAM 基址
@@ -130,6 +148,8 @@ sha256  29d863dec6b5e06d4acf9d6ce9908a61cd1a52a05a40ebccf2a806a243c46d8f
 ├── .gitignore                    [入库]
 ├── scripts                       [入库]
 │   ├── build_firmware_userp5.sh  # ★ 正式构建：P5 用 ndsl_mod.py 编码
+│   ├── patch_hns_ique.py         # ★ 在成品上打"跳过开机健康提示"补丁（神游 P1）
+│   ├── README-hns-ique.md        # ★ 补丁偏移/依据/风险分级/真机结论
 │   ├── build_firmware.sh         # 早期版本，真机白屏，仅作参考
 │   ├── make_header.py            # 生成 256 KiB iQue 主固件头
 │   ├── patch_pre_p1.py           # 补齐 dsfwtool 未建模的 P1 前数据区
@@ -137,14 +157,15 @@ sha256  29d863dec6b5e06d4acf9d6ce9908a61cd1a52a05a40ebccf2a806a243c46d8f
 │   ├── subset_p5_min.py          # 另一路子集：只清位图、结构不动（放不下，留档）
 │   └── build_variant_jp_p2.sh    # 反向/变体构建脚本（排查用，见第 8 条）
 ├── ndsl-hns-mod                  # 独立的固件魔改工具链
-│   └── tools/ndsl_mod.py         # [入库] ★ vpk/LZ77 编码器 + KEY1 + 校验（本移植依赖它）
+│   ├── tools/ndsl_mod.py         # [入库] ★ vpk/LZ77 编码器 + KEY1 + 校验（本移植依赖它）
+│   └── 彻底去掉健康提示-直接进菜单.md  # [入库] 外版 P1 的几种改法、代价与取舍
 ├── build/                        # [本地] 构建中间文件，由脚本生成
 ├── dist/                         # [本地] 最终镜像，由脚本生成
 │   └── not-working-do-not-flash/ # [本地] 已知白屏/黑屏的旧镜像
-├── 网友分享的神游DSL固件/          # [本地] 使用者自备：神游 512 KiB 固件 dump
-│   └── idsl-fw.bin
-└── 从我的日版机DSL上提取的系统/    # [本地] 使用者自备：目标机 256 KiB 固件 dump
-    └── FW001656B0043F/firmware.bin
+├── 材料/                          # [本地] 使用者自备材料（不入库）：
+│   ├── 网友分享的神游DSL固件/idsl-fw.bin              # 神游 512 KiB 固件 dump
+│   └── 我的固件 FW001656B0043F/                       # 目标机 256 KiB dump + BIOS
+│       ├── firmware.bin  biosnds7.rom  biosnds9.rom
 ```
 
 `ndsl-hns-mod/factory/`（原厂固件副本）和 `ndsl-hns-mod/out/`（去掉开机健康提示
@@ -248,6 +269,26 @@ dist/idsl-256k-chs-userp5.bin
 ```
 
 脚本最后会自动跑 `dsfwtool -i` 打印分量布局，并输出 `sha256sum`。
+
+### 加上"跳过开机健康提示"
+
+上面这份镜像本身不改动开机流程。要在它基础上把开机健康提示去掉，再用
+`scripts/patch_hns_ique.py` 打补丁（脚本自带编码器逐字节复刻断言、LZ77 重叠匹配
+不变量、往返与 5 项 CRC 校验）：
+
+```bash
+# 完全去掉：不装载警告画面 + 警告阶段不跑 + 无过渡（真机验证过）
+python3 scripts/patch_hns_ique.py dist/idsl-256k-chs-userp5.bin \
+        -o dist/idsl-256k-chs-userp5-hns-v4.bin --mode v4
+
+# 自动跳过：照原版显示约 1.5 s，然后自动进菜单（真机验证过）
+python3 scripts/patch_hns_ique.py dist/idsl-256k-chs-userp5.bin \
+        -o dist/idsl-256k-chs-userp5-hns-autoskip.bin --mode autoskip
+```
+
+`--mode` 还可选 `noshow`（不显示但保留装载）与 `noload`（不装载 + 不显示、保留过渡）。
+`v4`/`noload` 因为有两处钩子落在 LZ77 匹配内部，需要整条重压 P1；`noshow`/`autoskip`
+只改字面量，属于零编码器风险。详见 `scripts/README-hns-ique.md`。
 
 ---
 
